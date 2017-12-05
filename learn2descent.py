@@ -133,7 +133,7 @@ def g_rnn(gradients, state):
     return tf.squeeze(update, axis=[1]), state
 
 
-## Our LSTM based on hessians
+## Our LSTM based on hessians HELLO
 derivativeLSTM_cell_LAYERS = 2
 derivativeLSTM_cell_STATE_SIZE = 20
 
