@@ -42,7 +42,7 @@ def g_rms(gradients, state, learning_rate=0.1, decay_rate=0.99):
 # In[14]:
 
 
-TRAINING_STEPS = 29 # This is 100 in the paper
+TRAINING_STEPS = 10 # This is 100 in the paper
 initial_pos = tf.random_uniform([DIMS], -1., 1.)
 def learn(optimizer):
     losses = []
@@ -82,7 +82,9 @@ def learn_quadratic_2(qaudratic_optimizer):
         grads, = tf.gradients(loss, x)
         hessians, = tf.hessians(loss, x)
         hessian_diag = tf.diag_part(hessians)
-        derivatives = tf.stack([grads, hessian_diag], axis=1)
+        normalized_grads = pre_processor(grads)
+        normalized_hess = pre_processor(hessian_diag)
+        derivatives = tf.stack([normalized_grads, normalized_hess], axis=1)
         update, state= qaudratic_optimizer(derivatives, state)
         x += update
     return losses
@@ -185,6 +187,11 @@ new_apply_update = optimize(new_sum_losses)
 
 # In[26]:
 
+def pre_processor(input, p=10):
+    if tf.log(input) >= tf.exp(-p):
+        return tf.stack([tf.log(tf.abs(input))/p, tf.sign(input)], axis = 1)
+    else:
+        return tf.stack([tf.ones(input.shape), tf.exp(p) * input], axis = 1)
 
 sess.run(tf.global_variables_initializer())
 print ("reporting the error change for Google's LSTM...")
