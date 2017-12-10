@@ -6,16 +6,28 @@ from matplotlib import use
 use('Qt4Agg')
 
 import tensorflow as tf
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 # In[11]:
 
+def pre_processor(input, p=10.):
+    big_input_condition = tf.greater_equal(tf.abs(input), tf.exp(-p))
+    output = tf.where(big_input_condition,
+                           tf.stack([tf.log(tf.abs(input)) / p, tf.sign(input)], axis=1),
+                           tf.stack([-tf.ones(input.shape[0]), tf.exp(p) * input], axis=1))
+
+    return output
 
 DIMS = 10  # Dimensions of the parabola
-scale = tf.random_uniform([DIMS], 0.5, 1.5)
+# scale = tf.random_uniform([DIMS], 0.5, 1.5)
+W = tf.random_normal([DIMS, DIMS])
+y = tf.random_normal([DIMS])
+
 # This represents the network/function we are trying to optimize,
 def f(x):
-    x = scale*x
+    x = W*x - y
     return tf.reduce_sum(x*x)
 
 
@@ -23,7 +35,7 @@ def f(x):
 
 
 # Gradient Descent
-def g_sgd(gradients, state, learning_rate=0.1):
+def g_sgd(gradients, state, learning_rate=0.01):
     return -learning_rate*gradients, state
 
 
@@ -34,7 +46,7 @@ def g_sgd(gradients, state, learning_rate=0.1):
 def g_rms(gradients, state, learning_rate=0.1, decay_rate=0.99):
     if state is None:
         state = tf.zeros(DIMS)
-    state = decay_rate*state + (1-decay_rate)*tf.pow(gradients, 2)
+    state = decay_rate * state + (1-decay_rate)*tf.pow(gradients, 2)
     update = -learning_rate*gradients / (tf.sqrt(state)+1e-5)
     return update, state
 
@@ -42,8 +54,30 @@ def g_rms(gradients, state, learning_rate=0.1, decay_rate=0.99):
 # In[14]:
 
 
-TRAINING_STEPS = 10 # This is 100 in the paper
-initial_pos = tf.random_uniform([DIMS], -1., 1.)
+TRAINING_STEPS = 20 # This is 100 in the paper
+# initial_pos = tf.random_uniform([DIMS], -5., 5.)
+initial_pos = tf.random_normal([DIMS])
+
+def learn_2(optimizer):
+    losses = []
+    training_losses = []
+    x = initial_pos
+    state = None
+    for _ in range(TRAINING_STEPS):
+        loss = f(x)
+
+        losses.append(loss)
+        training_losses.append(loss)
+
+        training_losses=training_losses[-5:]
+        grads, = tf.gradients(loss, x)
+
+        new_grads = pre_processor(grads)
+        # new_grads = grads
+        update, state = optimizer(new_grads, state)
+        x += update
+    return losses, training_losses
+
 def learn(optimizer):
     losses = []
     x = initial_pos
@@ -52,10 +86,12 @@ def learn(optimizer):
         loss = f(x)
         losses.append(loss)
         grads, = tf.gradients(loss, x)
-      
-        update, state = optimizer(grads, state)
+        # new_grads = pre_processor(grads)
+        new_grads = grads
+        update, state = optimizer(new_grads, state)
         x += update
     return losses
+
 
 def learn_quadratic(qaudratic_optimizer):
     losses = []
@@ -72,6 +108,9 @@ def learn_quadratic(qaudratic_optimizer):
         x +=  1. / hess_update * grad_update
     return losses
 
+# initial_pos = tf.random_uniform([DIMS], -5., 5.)
+initial_pos = tf.random_normal([DIMS])
+
 def learn_quadratic_2(qaudratic_optimizer):
     losses = []
     x = initial_pos
@@ -84,7 +123,7 @@ def learn_quadratic_2(qaudratic_optimizer):
         hessian_diag = tf.diag_part(hessians)
         normalized_grads = pre_processor(grads)
         normalized_hess = pre_processor(hessian_diag)
-        derivatives = tf.stack([normalized_grads, normalized_hess], axis=1)
+        derivatives = tf.concat([normalized_grads, normalized_hess], 1)
         update, state= qaudratic_optimizer(derivatives, state)
         x += update
     return losses
@@ -95,12 +134,8 @@ rms_losses = learn(g_rms)
 
 
 
-sess = tf.InteractiveSession()
+sess = tf.Session()
 sess.run(tf.global_variables_initializer())
-import matplotlib
-import matplotlib.pyplot as plt
-# get_ipython().magic(u'matplotlib inline')
-import numpy as np
 x = np.arange(TRAINING_STEPS)
 
 # for _ in range(3):
@@ -125,8 +160,9 @@ cell_1 = tf.make_template('cell', cell_1)
 
 def g_rnn(gradients, state):
     # Make a `batch' of single gradients to create a 
-    # "coordinate-wise" RNN as the paper describes. 
-    gradients = tf.expand_dims(gradients, axis=1)
+    # "coordinate-wise" RNN as the paper describes.
+
+    # gradients = tf.expand_dims(gradients, axis=1)
  
     if state is None:
         state = [[tf.zeros([DIMS, STATE_SIZE_1])] * 2] * LAYERS_1
@@ -168,7 +204,7 @@ def g_h_rnn_2(derivatives, state):
 # In[24]:
 
 
-rnn_losses = learn(g_rnn)
+rnn_losses, _ = learn_2(g_rnn)
 sum_losses = tf.reduce_sum(rnn_losses)
 
 new_rnn_losses = learn_quadratic_2(g_h_rnn_2)
@@ -177,9 +213,11 @@ new_sum_losses = tf.reduce_sum(new_rnn_losses)
 
 
 def optimize(loss):
-    optimizer = tf.train.AdamOptimizer(0.0001)
+    optimizer = tf.train.AdamOptimizer(0.001)
     gradients, v = zip(*optimizer.compute_gradients(loss))
-    gradients, _ = tf.clip_by_global_norm(gradients, 1.)
+    gradients, _ = tf.clip_by_global_norm(gradients, 10.)
+
+    # gradients=gradients / tf.norm(gradients)
     return optimizer.apply_gradients(zip(gradients, v))
 
 apply_update = optimize(sum_losses)
@@ -187,11 +225,6 @@ new_apply_update = optimize(new_sum_losses)
 
 # In[26]:
 
-def pre_processor(input, p=10):
-    if tf.log(input) >= tf.exp(-p):
-        return tf.stack([tf.log(tf.abs(input))/p, tf.sign(input)], axis = 1)
-    else:
-        return tf.stack([tf.ones(input.shape), tf.exp(p) * input], axis = 1)
 
 sess.run(tf.global_variables_initializer())
 print ("reporting the error change for Google's LSTM...")
